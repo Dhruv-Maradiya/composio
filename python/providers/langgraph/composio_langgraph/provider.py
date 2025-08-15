@@ -2,10 +2,11 @@
 
 import types
 import typing as t
-from inspect import Signature
+from inspect import Signature, Parameter
 
 import pydantic
 from langchain_core.tools import StructuredTool as BaseStructuredTool
+from langchain_core.runnables.config import RunnableConfig
 
 from composio.core.provider import AgenticProvider, AgenticProviderExecuteFn
 from composio.types import Tool
@@ -32,6 +33,16 @@ class LanggraphProvider(
     Composio toolset for Langchain framework.
     """
 
+    def __init__(
+        self,
+        *args,
+        add_runnable_config: bool = False,
+        **kwargs
+    ):
+        super().__init__(*args, **kwargs)
+        self.add_runnable_config = add_runnable_config
+
+
     def _wrap_action(
         self,
         tool: str,
@@ -49,12 +60,31 @@ class LanggraphProvider(
             name=tool,
             closure=function.__closure__,
         )
-        action_func.__signature__ = Signature(  # type: ignore
-            parameters=get_signature_format_from_schema_params(
-                schema_params=schema_params
+
+        parameters = get_signature_format_from_schema_params(
+            schema_params=schema_params
+        )
+
+        if self.add_runnable_config:
+            # Add RunnableConfig param with a collision-safe name
+            parameters.append(
+                Parameter(
+                    "__runnable_config__",
+                    kind=Parameter.KEYWORD_ONLY,
+                    default=None,
+                    annotation=RunnableConfig,
+                )
             )
+
+        action_func.__signature__ = Signature(  # type: ignore
+            parameters=parameters
         )
         action_func.__doc__ = description
+
+        if self.add_runnable_config:
+            # Create __annotations__ so langchain can recognize the RunnableConfig
+            action_func.__annotations__ = {"__runnable_config__": RunnableConfig}
+        
         return action_func
 
     def wrap_tool(
